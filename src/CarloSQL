@@ -1,0 +1,214 @@
+-- PRIMERO QUE NADA CREAMOS LAS TABLAS
+
+-- TABLA DIRECTOR
+CREATE TABLE Director (
+    Codigo VARCHAR(20) PRIMARY KEY,
+    Nombre VARCHAR(50) NOT NULL,
+    Apellido VARCHAR(50) NOT NULL,
+    Fecha_Nac DATE NOT NULL,
+    Tipo VARCHAR(20) CHECK (Tipo IN ('Principal', 'Suplente'))
+);
+
+-- TABLA Película
+CREATE TABLE Película (
+    Titulo VARCHAR(100) PRIMARY KEY,
+    Codigo_Director VARCHAR(20) NOT NULL,
+    Sinopsis TEXT,
+    Pais_Produccion VARCHAR(50),
+    Genero VARCHAR(50),
+    FOREIGN KEY (Codigo_Director) REFERENCES Director(Codigo)
+);
+
+-- TABLA VERSION
+CREATE TABLE Version (
+    Codigo VARCHAR(20) PRIMARY KEY,
+    Año INTEGER NOT NULL,
+    Idioma VARCHAR(50) NOT NULL,
+    Titulo VARCHAR(100) NOT NULL,
+    FOREIGN KEY (Titulo) REFERENCES Película(Titulo)
+);
+
+-- TABLA EJEMPLAR
+CREATE TABLE Ejemplar (
+    Formato VARCHAR(50) NOT NULL,
+    Observaciones TEXT,
+    Numero INTEGER NOT NULL,
+    Codigo VARCHAR(20) NOT NULL,
+    PRIMARY KEY (Numero, Codigo),
+    FOREIGN KEY (Codigo) REFERENCES Version(Codigo)
+);
+
+-- TABLA USUARIO
+CREATE TABLE Usuario (
+    Cedula VARCHAR(20) PRIMARY KEY,
+    Nombre VARCHAR(50) NOT NULL,
+    Apellido VARCHAR(50) NOT NULL,
+    Telefono VARCHAR(20)
+);
+
+-- RELACION ACCEDE
+CREATE TABLE Accede (
+    Fecha_Terminacion DATE,
+    Fecha_Acceso DATE NOT NULL,
+    Cedula VARCHAR(20) NOT NULL,
+    Numero INTEGER NOT NULL,
+    Codigo_Version VARCHAR(20) NOT NULL,
+    PRIMARY KEY (Cedula, Numero, Codigo_Version),
+    FOREIGN KEY (Cedula) REFERENCES Usuario(Cedula),
+    FOREIGN KEY (Numero, Codigo_Version) REFERENCES Ejemplar(Numero, Codigo)
+);
+
+-- PROCEDEMOS A INSERTAR TUPLAS EN LAS TABLAS
+
+-- TABLA DIRECTOR
+INSERT INTO Director (Codigo, Nombre, Apellido, Fecha_Nac, Tipo) VALUES
+('D001', 'Carlitos', 'Hernandez', '1999-10-05', 'Principal'),
+('D002', 'Valeria', 'Montilla', '2003-01-31', 'Suplente'),
+('D003', 'Guillermo', 'Del Toro', '1964-05-09', 'Principal');
+
+-- TABLA PELICULA
+INSERT INTO Película (Titulo, Codigo_Director, Sinopsis, Pais_Produccion, Genero) VALUES
+('El laberinto del Fauno', 'D001', 'Sinopsis A', 'España', 'Drama'),
+('The batman', 'D002', 'Sinopsis B', 'Estados Unidos', 'Acción'),
+('Pulp Fiction', 'D003', 'Sinopsis C', 'Francia', 'Comedia');
+
+-- TABLA VERSION
+INSERT INTO Version (Codigo, Año, Idioma, Titulo) VALUES
+('V001', 2007, 'Español', 'El laberinto del Fauno'),
+('V002', 2019, 'Inglés', 'The batman'),
+('V003', 1999, 'Francés', 'Pulp Fiction');
+
+-- TABLA EJEMPLAR
+INSERT INTO Ejemplar (Formato, Observaciones, Numero, Codigo) VALUES
+('Digital', 'Buena calidad', 1, 'V001'),
+('Físico', 'DVD', 2, 'V002'),
+('Digital', 'Alta resolución', 3, 'V003'),
+('Físico', 'Blu-ray', 4, 'V001');
+
+-- TABLA USUARIOS
+INSERT INTO Usuario (Cedula, Nombre, Apellido, Telefono) VALUES
+('29665267', 'Carlitos', 'Hernandez', '1234567890'),
+('31943381', 'Valeria', 'Montilla', '0987654321');
+
+-- TABLA ACCEDE
+INSERT INTO Accede (Fecha_Terminacion, Fecha_Acceso, Cedula, Numero, Codigo_Version) VALUES
+('2023-03-01', '2023-02-01', '29665267', 1, 'V001'),
+('2023-04-01', '2023-03-01', '31943381', 2, 'V002'),
+('2023-05-01', '2023-04-01', '29665267', 3, 'V003'),
+('2023-06-01', '2023-05-01', '31943381', 4, 'V001');
+
+-- AHORA CREAMOS UNA VISTA
+
+CREATE VIEW V_PELICULAS AS
+SELECT 
+    p.Titulo, 
+    p.Sinopsis, 
+    v.Año, 
+    v.Idioma,
+    d.Nombre AS Director_Nombre,
+    d.Apellido AS Director_Apellido,
+    e.Formato, 
+    e.Observaciones,
+    u.Nombre AS Usuario_Nombre, 
+    u.Apellido AS Usuario_Apellido,
+    a.Fecha_Acceso,
+    a.Fecha_Terminacion
+FROM Película p
+JOIN Director d ON p.Codigo_Director = d.Codigo
+JOIN Version v ON p.Titulo = v.Titulo
+JOIN Ejemplar e ON v.Codigo = e.Codigo
+JOIN Accede a ON e.Numero = a.Numero AND e.Codigo = a.Codigo_Version
+JOIN Usuario u ON a.Cedula = u.Cedula;
+
+-- CREAMOS UNA REESTRICION PARA PREVENIR EL ACCESO MULTIPLE
+
+CREATE OR REPLACE FUNCTION prevenir_acceso_multiple()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM Accede a
+        JOIN Ejemplar e1 ON a.Numero = e1.Numero AND a.Codigo_Version = e1.Codigo
+        JOIN Version v1 ON e1.Codigo = v1.Codigo
+        JOIN Película p1 ON v1.Titulo = p1.Titulo
+        JOIN Ejemplar e2 ON e2.Codigo = v1.Codigo
+        JOIN Version v2 ON e2.Codigo = v2.Codigo
+        WHERE a.Cedula = NEW.Cedula
+          AND p1.Titulo = v2.Titulo
+          AND e1.Numero <> e2.Numero
+          AND e1.Formato <> e2.Formato
+    ) THEN
+        RAISE EXCEPTION 'Un usuario no puede acceder al mismo título en diferentes formatos.';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_prevenir_acceso_multiple
+BEFORE INSERT ON Accede
+FOR EACH ROW
+EXECUTE FUNCTION prevenir_acceso_multiple();
+
+-- Diosito ayuda
+
+-- AHORA VAMOS A HACER LAS ACTUALIZACIONES DE LAS TABLAS
+
+-- ACT DE LA TABLA PELICULA
+UPDATE Película
+SET Genero = 'Fantasía'
+WHERE Titulo = 'El laberinto del Fauno';
+
+-- ACT DE LA TABLA DIRECTOR
+UPDATE Director
+SET Nombre = 'Carlos'
+WHERE Codigo = 'D001';
+
+-- ACT DE LA TABLA EJEMPLAR
+UPDATE Ejemplar
+SET Observaciones = 'Muy buena calidad'
+WHERE Numero = 2 AND Codigo = 'V002';
+
+-- Segunda ACT DE LA TABLA PELICULA
+UPDATE Película
+SET Sinopsis = 'Un viaje oscuro y fascinante en Gotham'
+WHERE Titulo = 'The batman';
+
+-- Segunda ACT DE LA TABLA DIRECTOR
+UPDATE Director
+SET Apellido = 'Hernández'
+WHERE Codigo = 'D001';
+
+-- SEGUNDA ACT DE LA TABLA EJEMPLAR
+UPDATE Ejemplar
+SET Observaciones = 'Resolución impresionante'
+WHERE Numero = 3 AND Codigo = 'V003';
+
+-- POR ÚLTIMO BORRAREMOS PAR DE USUARIOS
+
+-- PRIMERO TENEMOS QUE ELIMINAR LA RELACION ENTRE ACCEDE Y EL USUARIO, PORQUE SI NO NO ME DEJA BORRAR A LOS USUARIOS
+DELETE FROM Accede
+WHERE Cedula = '29665267';
+
+DELETE FROM Accede
+WHERE Cedula = '31943381';
+
+-- AHORA POR FIN SI ME DEJA BORRAR A LOS UNICOS 2 USUARIOS
+DELETE FROM Usuario
+WHERE Cedula = '29665267';
+
+DELETE FROM Usuario
+WHERE Cedula = '31943381';
+
+-- INSERTAMOS UN PAR USUARIO MAS Y UN ACCESO MAS PARA QUE SE PUEDA VER LA VISTA CON TODOS LOS ELEMENTOS 
+
+INSERT INTO Usuario (Cedula, Nombre, Apellido, Telefono) VALUES
+('9855393', 'Isabel', 'Sanchez', '055465487');
+
+INSERT INTO Accede (Fecha_Terminacion, Fecha_Acceso, Cedula, Numero, Codigo_Version) VALUES
+('2023-03-01', '2023-02-01', '9855393', 1, 'V001');
+
+INSERT INTO Usuario (Cedula, Nombre, Apellido, Telefono) VALUES
+('5424186', 'German', 'Hernandez', '111111111');
+
+INSERT INTO Accede (Fecha_Terminacion, Fecha_Acceso, Cedula, Numero, Codigo_Version) VALUES
+('2022-03-01', '2021-02-01', '5424186', 2, 'V002');
